@@ -7,8 +7,12 @@ import { createWindow } from '../../Services/NonAngular/IPC';
 import {
     ChangeTab,
     FeedNameInfo,
+    UserWorkspaceSetting,
+    UserScreenSetting,
     CrossReferenceCreate,
-    CrossReferenceCancel
+    CrossReferenceCancel,
+    Screen,
+    SetUserWorkspaceSetting
 } from '../../MessagesTs/MessageDefinitions';
 import {
     Layout,
@@ -16,12 +20,7 @@ import {
     LayoutTabColumn,
     LayoutTabRow,
     LayoutView,
-    Workspace,
-    Screen,
-    UserWorkspaceSetting,
-    UserScreenSetting,
-    GetUserWorkspaceSetting,
-    SetUserWorkspaceSetting
+    Workspace
 } from '../../MessagesTs/ServicesMessageDefinitions';
 import { IUnitService } from '../../Services/IUnitService';
 import { IEventService } from '../../Services/IEventService';
@@ -97,8 +96,7 @@ import {
     unregisterWorkspaceChangedCallback,
     saveTabs,
     saveLayouts,
-    saveWorkspaces,
-    tabsEqual
+    saveWorkspaces
 } from '../../Services/NonAngular/LayoutService';
 import { setTheme } from '../../Services/NonAngular/ThemeService';
 
@@ -229,7 +227,7 @@ const onCallPresentationViews: {
     {
         existingView: '',
         featureFlag: areNewUnitEventBoardsEnabled,
-        replacementView: 'EagleViewMap'
+        replacementView: 'PictometryMap'
     }
 ];
 
@@ -2103,21 +2101,14 @@ export class SingleScreen {
     };
 
     public openOtherWorkspaceWindows = () => {
-        const screensOpen = JSON.parse(localStorage.getItem('ipc-workspace-screens'));
-        // regex to get the screen number from the workspacesToOpen url.
-        const reg = /wsscreen=(.*)&layout/i;
         this.workspaceWindowsToOpen.forEach((w, i) => {
-            // will only open screens that are in the layout but not already open.
-            const screenNum = parseInt(w.match(reg)[1]);
-            if (!screensOpen.some(screen => screen.screenNumber === screenNum)) {
-                createSingletonWindow(
-                    window.document.title + ' ' + i,
-                    null,
-                    w,
-                    window.document.title + ' ' + i,
-                    false
-                );
-            }
+            createSingletonWindow(
+                window.document.title + ' ' + i,
+                null,
+                w,
+                window.document.title + ' ' + i,
+                false
+            );
         });
         this.openOtherTabs = true;
         const screenNumber = _.isNumber(SCREEN_NUMBER) ? SCREEN_NUMBER : 0;
@@ -2519,12 +2510,12 @@ export class SingleScreen {
     public saveWorkspaceLayoutTabConfig = (tabId: any, layoutId?: any, screenNumber?: number) => {
         let index: number;
         index = screenNumber ? screenNumber : SCREEN_NUMBER;
-        const request = new GetUserWorkspaceSetting.V1_0_0.GetUserWorkspaceSettingRequest();
+        const request = new Msg.GetUserWorkspaceSetting.V1_0_0.GetUserWorkspaceSettingRequest();
         sendCommand(request)
             .then(rsp => {
                 if (rsp.mhdr.response.success) {
                     var resultData =
-                        rsp.body as GetUserWorkspaceSetting.V1_0_0.GetUserWorkspaceSettingResponse;
+                        rsp.body as Msg.GetUserWorkspaceSetting.V1_0_0.GetUserWorkspaceSettingResponse;
                     if (resultData.settings) {
                         this.settings = resultData.settings;
                     }
@@ -3374,7 +3365,7 @@ export class SingleScreen {
                         () => (mapOptions.style.transform = 'translateX(494px)')
                     );
                 }
-                if (this.eventPanelVisible || this.unitPanelVisible) {
+                if (!this.dockPanelsToOppositeSide && (this.eventPanelVisible || this.unitPanelVisible)) {
                     x = '500px';
                     if (mapOptions) {
                         initialTransforms.push(
@@ -3397,7 +3388,7 @@ export class SingleScreen {
         switch (fromDirection) {
             case DockDirection.Top:
                 //push transform to set initial position
-                initialTransforms.push(() => (el.style.transform = `translate(${x}, 0%)`));
+                initialTransforms.push(() => (el.style.transform = `translate(${x}, -100%)`));
                 shiftY();
                 shiftX();
                 break;
@@ -3414,7 +3405,7 @@ export class SingleScreen {
                 break;
             case DockDirection.Bottom:
                 //push transform to set initial position
-                initialTransforms.push(() => (el.style.transform = `translate(${x}, 0%)`));
+                initialTransforms.push(() => (el.style.transform = `translate(${x}, 100%)`));
                 shiftY();
                 shiftX();
                 // shrink the size of the screen by the size of the size of the docked command line if there is an undocked command line
@@ -3430,7 +3421,7 @@ export class SingleScreen {
                 shiftX();
                 shiftY();
                 if (el.dataset.viewKey !== 'COMMAND_LINE_VIEW') {
-                    if (this.eventPanelVisible || this.unitPanelVisible) {
+                    if (!this.dockPanelsToOppositeSide && (this.eventPanelVisible || this.unitPanelVisible)) {
                         if (mapOptions) {
                             mapOptions.style.transform = 'translateX(930px)';
                             if (
@@ -3480,7 +3471,8 @@ export class SingleScreen {
             dataViewKey !== 'CUSTOM_FEED_VIEW' &&
             dataViewKey !== 'CUSTOM_VIEWS'
         ) {
-            if (!this.eventPanelVisible && !this.unitPanelVisible) {
+            if ((this.dockPanelsToOppositeSide && (this.eventPanelVisible || this.unitPanelVisible)) ||
+                (!this.eventPanelVisible && !this.unitPanelVisible)) {
                 const x = this.getTranslateX(mapOptions);
                 if (x !== '0px') {
                     mapOptions.style.transform = 'translateX(0px)';
@@ -3528,7 +3520,7 @@ export class SingleScreen {
                 this.resetMapOptionsPosition(dataViewKey, mapOptions);
                 break;
             case DockDirection.Left:
-                if (this.eventPanelVisible || this.unitPanelVisible) {
+                if (!this.dockPanelsToOppositeSide && this.eventPanelVisible || this.unitPanelVisible) {
                     if (
                         el.dataset.viewKey === 'Informer AdHoc Query' ||
                         el.dataset.viewKey === 'Smart Advisor'
@@ -3727,7 +3719,7 @@ export class SingleScreen {
         if (this.eventPanelVisible !== showingEventPanel) {
             this.eventPanelVisible = showingEventPanel;
 
-            if (this.eventPanelVisible && this.hasEventPanel) {
+            if (!this.dockPanelsToOppositeSide && this.eventPanelVisible && this.hasEventPanel) {
                 if (dir === 'left' && this.widgetPanelOpen) {
                     customWidgetPanel.style.transform = 'translateX(930px)';
                     mapOptions.style.transform = 'translateX(930px)';
@@ -3749,7 +3741,7 @@ export class SingleScreen {
         if (this.unitPanelVisible !== showingUnitPanel) {
             this.unitPanelVisible = showingUnitPanel;
 
-            if (this.unitPanelVisible) {
+            if (!this.dockPanelsToOppositeSide && this.unitPanelVisible) {
                 if (dir === 'left' && this.widgetPanelOpen) {
                     customWidgetPanel.style.transform = 'translateX(930px)';
                     mapOptions.style.transform = 'translateX(930px)';
@@ -3937,13 +3929,6 @@ export class SingleScreen {
                 );
             }
         }
-
-        // check if other screens are already loaded, if any screens are missing,
-        // show the modal to open other screens.
-        let screens = JSON.parse(localStorage.getItem('ipc-workspace-screens'));
-        if (screens?.length - 1 >= this.workspaceWindowsToOpen.length) {
-            this.offerToOpenOtherTabs = false;
-        }
         if (this.offerToOpenOtherTabs) {
             this.willOpenNewTabsPrompt = getStrings(
                 'WORKSPACE_WILL_OPEN_NEW_TABS_PROMPT',
@@ -4052,7 +4037,7 @@ export class SingleScreen {
             } else {
                 // We found an existing tab, lets check to see if we have the latest version of this tab as a default
                 const currentTab = this.tabs[foundIndex];
-                if (currentTab.version < tab.version || !tabsEqual(currentTab, tab)) {
+                if (currentTab.version < tab.version || !_.isEqual(currentTab, tab)) {
                     console.log('Updating this tab to a newer version');
                     updatedTabs.push(tab);
                     this.tabs[foundIndex] = tab;
